@@ -13,12 +13,11 @@ export function evaluate(permission: string, pattern: string, ...rulesets: Rule[
   )
   if (matching.length === 0) return { action: "ask", permission, pattern: "*" }
 
-  // deny rules always win regardless of order
-  const denied = matching.findLast((rule) => rule.action === "deny")
-  if (denied) return denied
-
-  // for ask vs allow, last matching rule wins (preserves intentional specificity
-  // overrides like *.env.example: allow after *.env.*: ask)
+  // Last matching rule wins. This allows specific rules to override earlier
+  // general ones in either direction, e.g.:
+  //   { "*": "deny", general: "allow" }  → general is allowed
+  //   { general: "allow", "*": "deny" }  → general is denied (deny comes last)
+  // Safety checks (Safety.check) run separately and cannot be overridden.
   const last = matching[matching.length - 1]!
   return last
 }
