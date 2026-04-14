@@ -52,8 +52,9 @@ async function openConfig(api: TuiPluginApi) {
   if (editor) {
     Process.spawn([...editor.split(" "), file], { stdout: "ignore", stderr: "ignore" })
   } else if (process.platform === "darwin") {
-    // open -t uses the default text editor; open alone uses file association
-    Process.spawn(["open", file], { stdout: "ignore", stderr: "ignore" })
+    // Try VS Code first if we're inside it, otherwise use TextEdit
+    const app = process.env["TERM_PROGRAM"] === "vscode" ? "Visual Studio Code" : "TextEdit"
+    Process.spawn(["open", "-a", app, file], { stdout: "ignore", stderr: "ignore" })
   } else if (process.platform === "win32") {
     Process.spawn(["notepad", file], { stdout: "ignore", stderr: "ignore" })
   } else {
