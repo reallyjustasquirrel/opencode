@@ -906,9 +906,27 @@ export namespace Config {
         .optional()
         .describe("When set, ONLY these providers will be enabled. All other providers will be ignored"),
       model: ModelId.describe("Model to use in the format of provider/model, eg anthropic/claude-2").optional(),
-      small_model: ModelId.describe(
+       small_model: ModelId.describe(
         "Small model to use for tasks like title generation in the format of provider/model",
       ).optional(),
+      plan_pipeline: z
+        .object({
+          enabled: z.boolean().optional().default(false),
+          models: z
+            .object({
+              reasoner: ModelId.describe("Model for reasoning phase (e.g., deepseek/deepseek-reasoner)"),
+              generator: ModelId.describe("Model for plan generation phase (e.g., qwen/qwen3-coder)"),
+              checker: ModelId.describe("Model for plan validation phase (e.g., deepseek/deepseek-reasoner)"),
+            })
+            .optional()
+            .default({
+              reasoner: "deepseek/deepseek-reasoner",
+              generator: "qwen/qwen3-coder", 
+              checker: "deepseek/deepseek-reasoner",
+            }),
+        })
+        .optional()
+        .default({}),
       default_agent: z
         .string()
         .optional()

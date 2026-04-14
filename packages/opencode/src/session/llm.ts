@@ -21,6 +21,7 @@ import { SessionID } from "@/session/schema"
 import { Auth } from "@/auth"
 import { Installation } from "@/installation"
 import { makeRuntime } from "@/effect/run-service"
+import { PlanPipeline } from "./plan-pipeline"
 
 export namespace LLM {
   const log = Log.create({ service: "llm" })
@@ -55,7 +56,7 @@ export namespace LLM {
 
   export class Service extends Context.Service<Service, Interface>()("@opencode/LLM") {}
 
-  export const layer: Layer.Layer<Service, never, Auth.Service | Config.Service | Provider.Service | Plugin.Service> =
+  export const layer: Layer.Layer<Service, never, Auth.Service | Config.Service | Provider.Service | Plugin.Service | PlanPipeline.Service> =
     Layer.effect(
       Service,
       Effect.gen(function* () {
@@ -63,6 +64,7 @@ export namespace LLM {
         const config = yield* Config.Service
         const provider = yield* Provider.Service
         const plugin = yield* Plugin.Service
+        const planPipeline = yield* PlanPipeline.Service
 
         const run = Effect.fn("LLM.run")(function* (input: StreamRequest) {
           const l = log
@@ -405,7 +407,25 @@ export namespace LLM {
             ),
           )
 
-        return Service.of({ stream })
+        return Service.of({
+          stream: (input: StreamInput) =>
+            Stream.unwrap(
+              Effect.gen(function* () {
+                const cfg = yield* config.get()
+                const pipelineCfg = cfg.plan_pipeline || { enabled: false }
+
+                if (pipelineCfg.enabled && input.agent.name === "plan") {
+                  return yield* planPipeline.stream(input)
+                }
+
+                const ctrl = new AbortController()
+                const result = yield* run({ ...input, abort: ctrl.signal })
+                return Stream.fromAsyncIterable(result.fullStream, (e) =>
+                  e instanceof Error ? e : new Error(String(e)),
+                )
+              }),
+            ),
+        })
       }),
     )
 
@@ -415,6 +435,7 @@ export namespace LLM {
       Layer.provide(Config.defaultLayer),
       Layer.provide(Provider.defaultLayer),
       Layer.provide(Plugin.defaultLayer),
+      Layer.provide(PlanPipeline.defaultLayer),
     ),
   )
 
