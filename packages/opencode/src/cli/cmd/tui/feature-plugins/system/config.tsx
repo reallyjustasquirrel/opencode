@@ -2,8 +2,8 @@ import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plug
 import { Global } from "@/global"
 import { Filesystem } from "@/util/filesystem"
 import { Process } from "@/util/process"
+import { spawn as nodeSpawn } from "child_process"
 import path from "path"
-import { execSync } from "child_process"
 
 const id = "internal:config"
 
@@ -50,19 +50,18 @@ async function openConfig(api: TuiPluginApi) {
 
   // GUI editors — open without blocking the TUI
   if (editor) {
-    Process.spawn([...editor.split(" "), file], { stdout: "ignore", stderr: "ignore" })
+    nodeSpawn(editor.split(" ")[0], [...editor.split(" ").slice(1), file], { detached: true, stdio: "ignore", env: process.env }).unref()
   } else if (process.platform === "darwin") {
     if (process.env["TERM_PROGRAM"] === "vscode") {
-      // Use the VS Code CLI directly — open always spawns a new window with --args
       const cli = "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"
-      Process.spawn([cli, "-r", file], { stdout: "ignore", stderr: "ignore" })
+      nodeSpawn(cli, ["-r", file], { detached: true, stdio: "ignore", env: process.env }).unref()
     } else {
-      Process.spawn(["open", "-a", "TextEdit", file], { stdout: "ignore", stderr: "ignore" })
+      nodeSpawn("open", ["-a", "TextEdit", file], { detached: true, stdio: "ignore" }).unref()
     }
   } else if (process.platform === "win32") {
-    Process.spawn(["notepad", file], { stdout: "ignore", stderr: "ignore" })
+    nodeSpawn("notepad", [file], { detached: true, stdio: "ignore" }).unref()
   } else {
-    Process.spawn(["xdg-open", file], { stdout: "ignore", stderr: "ignore" })
+    nodeSpawn("xdg-open", [file], { detached: true, stdio: "ignore" }).unref()
   }
   api.ui.toast({ variant: "info", message: `Opened ${file} — restart opencode after saving` })
 }
