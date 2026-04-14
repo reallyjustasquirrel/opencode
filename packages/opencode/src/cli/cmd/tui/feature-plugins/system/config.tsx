@@ -15,19 +15,23 @@ async function configPath(): Promise<string> {
   return path.join(dir, "opencode.jsonc")
 }
 
+function editorCommand(): string[] {
+  const editor = process.env["VISUAL"] || process.env["EDITOR"]
+  if (editor) return editor.split(" ")
+  if (process.env["TERM_PROGRAM"] === "vscode") return ["code", "--wait"]
+  if (process.platform === "darwin") return ["open", "-t"]
+  if (process.platform === "win32") return ["notepad"]
+  return ["xdg-open"]
+}
+
 async function openConfig(api: TuiPluginApi) {
   const file = await configPath()
-  const editor = process.env["VISUAL"] || process.env["EDITOR"]
-  if (!editor) {
-    api.ui.toast({ variant: "error", message: "Set $EDITOR or $VISUAL to open config" })
-    return
-  }
+  const cmd = editorCommand()
   const renderer = api.renderer
   renderer.suspend()
   renderer.currentRenderBuffer.clear()
   try {
-    const parts = editor.split(" ")
-    const proc = Process.spawn([...parts, file], {
+    const proc = Process.spawn([...cmd, file], {
       stdin: "inherit",
       stdout: "inherit",
       stderr: "inherit",
