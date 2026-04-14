@@ -125,9 +125,19 @@ export namespace Permission {
     deferred: Deferred.Deferred<void, RejectedError | CorrectedError>
   }
 
+  // denial tracking per session: prevents infinite rejection loops
+  const MAX_CONSECUTIVE_DENIALS = 3
+  const MAX_TOTAL_DENIALS = 20
+
+  interface DenialTracker {
+    consecutive: number
+    total: number
+  }
+
   interface State {
     pending: Map<PermissionID, PendingEntry>
     approved: Ruleset
+    denials: Map<string, DenialTracker>
   }
 
   export function evaluate(permission: string, pattern: string, ...rulesets: Ruleset[]): Rule {
@@ -149,6 +159,7 @@ export namespace Permission {
           const state = {
             pending: new Map<PermissionID, PendingEntry>(),
             approved: row?.data ?? [],
+            denials: new Map<string, DenialTracker>(),
           }
 
           yield* Effect.addFinalizer(() =>
@@ -219,6 +230,17 @@ export namespace Permission {
         })
 
         if (input.reply === "reject") {
+          const { denials } = yield* InstanceState.get(state)
+          const sid = existing.info.sessionID
+          const tracker = denials.get(sid) ?? { consecutive: 0, total: 0 }
+          tracker.consecutive++
+          tracker.total++
+          denials.set(sid, tracker)
+          if (tracker.consecutive >= MAX_CONSECUTIVE_DENIALS)
+            log.warn("denial_limit", { consecutive: tracker.consecutive, total: tracker.total, sessionID: sid })
+          if (tracker.total >= MAX_TOTAL_DENIALS)
+            log.warn("denial_total_limit", { total: tracker.total, sessionID: sid })
+
           yield* Deferred.fail(
             existing.deferred,
             input.message ? new CorrectedError({ feedback: input.message }) : new RejectedError(),
@@ -236,6 +258,11 @@ export namespace Permission {
           }
           return
         }
+
+        // approval resets consecutive denial counter
+        const { denials } = yield* InstanceState.get(state)
+        const tracker = denials.get(existing.info.sessionID)
+        if (tracker) tracker.consecutive = 0
 
         yield* Deferred.succeed(existing.deferred, undefined)
         if (input.reply === "once") return
