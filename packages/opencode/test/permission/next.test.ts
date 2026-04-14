@@ -1280,8 +1280,10 @@ it.live("denial tracking - consecutive rejections do not break", () =>
         yield* reply({ requestID: id, reply: "reject" })
         yield* Fiber.await(fiber)
       }
-      // 4th rejection succeeded without crash — tracking works
-      expect(true).toBe(true)
+      // all 4 rejections completed without crash
+      // (the denial tracker logged warnings at consecutive=3 and consecutive=4)
+      const items = yield* list()
+      expect(items).toHaveLength(0) // all pending cleared
     }),
   ),
 )
@@ -1335,10 +1337,12 @@ it.live("denial tracking - approval resets consecutive counter", () =>
         }).pipe(Effect.forkScoped)
         yield* waitForPending(1)
         yield* reply({ requestID: id, reply: "reject" })
-        yield* Fiber.await(fiber)
+        const exit = yield* Fiber.await(fiber)
+        expect(Exit.isFailure(exit)).toBe(true)
       }
 
-      expect(true).toBe(true)
+      // all pending cleared after sequence
+      expect(yield* list()).toHaveLength(0)
     }),
   ),
 )

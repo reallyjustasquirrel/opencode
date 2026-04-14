@@ -148,3 +148,31 @@ test("check - all dangerous directories trigger on edit", () => {
     expect(Safety.check("edit", `${dir}/anything`)).toBe("ask")
   }
 })
+
+// boundary: files that look dangerous but aren't
+
+test("check - .gitconfig.bak is NOT dangerous (suffix changes basename)", () => {
+  expect(Safety.check("edit", ".gitconfig.bak")).toBeNull()
+})
+
+test("check - bashrc without dot is NOT dangerous", () => {
+  expect(Safety.check("edit", "bashrc")).toBeNull()
+})
+
+test("check - .git-hooks is NOT a dangerous directory", () => {
+  expect(Safety.check("edit", ".git-hooks/pre-commit")).toBeNull()
+})
+
+test("check - gitconfig (no dot) is NOT dangerous", () => {
+  expect(Safety.check("edit", "gitconfig")).toBeNull()
+})
+
+// backslash paths
+
+test("check - backslash path .git\\config triggers", () => {
+  expect(Safety.check("edit", ".git\\config")).toBe("ask")
+})
+
+test("check - backslash nested path triggers", () => {
+  expect(Safety.check("edit", "src\\.vscode\\settings.json")).toBe("ask")
+})
