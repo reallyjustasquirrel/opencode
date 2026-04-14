@@ -13,6 +13,7 @@ import { Deferred, Effect, Layer, Schema, Context } from "effect"
 import os from "os"
 import z from "zod"
 import { evaluate as evalRule } from "./evaluate"
+import { Safety } from "./safety"
 import { PermissionID } from "./schema"
 
 export namespace Permission {
@@ -169,12 +170,17 @@ export namespace Permission {
         let needsAsk = false
 
         for (const pattern of request.patterns) {
+          const safety = Safety.check(request.permission, pattern)
           const rule = evaluate(request.permission, pattern, ruleset, approved)
-          log.info("evaluated", { permission: request.permission, pattern, action: rule })
+          log.info("evaluated", { permission: request.permission, pattern, action: rule, safety })
           if (rule.action === "deny") {
             return yield* new DeniedError({
               ruleset: ruleset.filter((rule) => Wildcard.match(request.permission, rule.permission)),
             })
+          }
+          if (safety === "ask") {
+            needsAsk = true
+            continue
           }
           if (rule.action === "allow") continue
           needsAsk = true
