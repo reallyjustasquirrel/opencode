@@ -224,9 +224,12 @@ test("check - interpreter result includes reason", () => {
 
 // safe edge cases that should NOT trigger
 
-test("check - $IFS inside single-quoted string in echo is still detected", () => {
-  // We detect raw $IFS in the command — even in echo context it's suspicious
-  expect(DangerousCommands.check("echo '$IFS'")).toBeTruthy()
+test("check - $IFS inside single-quoted string is a false positive (known limitation)", () => {
+  // Regex-only detection cannot distinguish quoted vs unquoted $IFS.
+  // This is a known false positive — single quotes prevent expansion in shell.
+  // The test documents the limitation rather than hiding it.
+  const result = DangerousCommands.check("echo '$IFS'")
+  expect(result).not.toBeNull() // false positive: triggers despite being safe
 })
 
 test("check - /proc/cpuinfo (not environ) is safe", () => {
@@ -291,4 +294,49 @@ test("check - zsocket is dangerous", () => {
 
 test("check - zf_rm is dangerous", () => {
   expect(DangerousCommands.check("zf_rm important_file")).toBeTruthy()
+})
+
+// chained destructive commands (bypass regression tests)
+
+test("check - rm -rf / followed by && is still dangerous", () => {
+  expect(DangerousCommands.check("rm -rf / && echo done")).toBeTruthy()
+})
+
+test("check - rm -rf / followed by ; is still dangerous", () => {
+  expect(DangerousCommands.check("rm -rf /; ls")).toBeTruthy()
+})
+
+test("check - rm -rf / followed by || is still dangerous", () => {
+  expect(DangerousCommands.check("rm -rf / || true")).toBeTruthy()
+})
+
+test("check - chmod -R 000 / with trailing command is still dangerous", () => {
+  expect(DangerousCommands.check("chmod -R 000 / && echo oops")).toBeTruthy()
+})
+
+// backslash path in safety (Windows-style)
+
+test("check - rm -rf $HOME still matches with braces", () => {
+  expect(DangerousCommands.check("rm -rf ${HOME}/")).toBeTruthy()
+})
+
+// multiline commands
+
+test("check - rm -rf / with embedded newline does not bypass", () => {
+  // newline-separated commands: the first part should still be caught
+  const result = DangerousCommands.check("rm -rf /\nls")
+  // Note: \n in the string is a literal newline. The regex $ does not match at \n
+  // unless multiline flag is set. Our fix uses [;&|] alternation instead.
+  // This documents whether newline bypass is handled.
+  expect(result).not.toBeNull()
+})
+
+// boundary: safe paths that look dangerous
+
+test("check - rm -rf ./root is safe (relative path)", () => {
+  expect(DangerousCommands.check("rm -rf ./root")).toBeNull()
+})
+
+test("check - rm -rf /tmp/build is safe (not root)", () => {
+  expect(DangerousCommands.check("rm -rf /tmp/build")).toBeNull()
 })

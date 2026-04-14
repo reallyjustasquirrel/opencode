@@ -5,15 +5,15 @@
 
 const DESTRUCTIVE = [
   // recursive removal of root or home
-  /\brm\b.*-[^\s]*r[^\s]*f.*\s+\/\s*$/,
-  /\brm\b.*-[^\s]*r[^\s]*f\s+\/$/,
-  /\brm\b.*-[^\s]*r[^\s]*f\s+~\/?$/,
-  /\brm\b.*-[^\s]*r[^\s]*f\s+\$HOME\/?$/,
-  /\brm\b.*-[^\s]*r[^\s]*f\s+\$\{?HOME\}?\/?$/,
-  /\brm\b.*-[^\s]*r[^\s]*\s+\/\s*$/,
+  // match rm -rf / whether at end of string or followed by ; && || newline etc.
+  /\brm\b.*-[^\s]*r[^\s]*f.*\s+\/\s*(?:$|[;&|\n])/,
+  /\brm\b.*-[^\s]*r[^\s]*f\s+~\/?(?:\s*$|[;&|\n])/,
+  /\brm\b.*-[^\s]*r[^\s]*f\s+\$HOME\/?(?:\s*$|[;&|\n])/,
+  /\brm\b.*-[^\s]*r[^\s]*f\s+\$\{?HOME\}?\/?(?:\s*$|[;&|\n])/,
+  /\brm\b.*-[^\s]*r[^\s]*\s+\/\s*(?:$|[;&|\n])/,
   // chmod/chown -R on root
-  /\bchmod\b.*-[^\s]*R[^\s]*\s+\d+\s+\/\s*$/,
-  /\bchown\b.*-[^\s]*R[^\s]*\s+\S+\s+\/\s*$/,
+  /\bchmod\b.*-[^\s]*R[^\s]*\s+\d+\s+\/\s*(?:$|[;&|\n])/,
+  /\bchown\b.*-[^\s]*R[^\s]*\s+\S+\s+\/\s*(?:$|[;&|\n])/,
   // disk/partition destruction
   /\bmkfs\b/,
   /\bdd\b.*\bof\s*=\s*\/dev\/[sh]d/,
