@@ -1,0 +1,130 @@
+name: nightly-hardened
+
+on:
+  schedule:
+    # 04:00 UTC daily
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  sync-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: hardened
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Sync upstream dev
+        run: |
+          git remote add upstream https://github.com/anomalyco/opencode.git || true
+          git fetch upstream dev
+          git checkout dev
+          git reset --hard upstream/dev
+          git push origin dev --force
+
+      - name: Rebase hardened onto dev
+        id: rebase
+        run: |
+          git checkout hardened
+          if git rebase dev; then
+            echo "status=success" >> "$GITHUB_OUTPUT"
+          else
+            git rebase --abort
+            echo "status=conflict" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open issue on conflict
+        if: steps.rebase.outputs.status == 'conflict'
+        run: |
+          gh issue create \
+            --title "Nightly rebase conflict — $(date -u +%Y-%m-%d)" \
+            --body "The nightly rebase of \`hardened\` onto upstream \`dev\` failed due to conflicts. Manual resolution required." \
+            --label "bug"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Exit on conflict
+        if: steps.rebase.outputs.status == 'conflict'
+        run: exit 1
+
+      - name: Push rebased hardened
+        run: git push origin hardened --force-with-lease
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3"
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Typecheck
+        run: bun turbo typecheck
+
+      - name: Test permission module
+        run: cd packages/opencode && bun test test/permission/
+
+      - name: Test all
+        run: cd packages/opencode && bun test
+
+      - name: Build CLI (Linux x64)
+        run: ./packages/opencode/script/build.ts --single
+        continue-on-error: true
+
+      - name: Package VS Code extension
+        run: |
+          cd sdks/vscode
+          bun install
+          bun run package
+          npx @vscode/vsce package --no-dependencies
+
+      - name: Prepare release artifacts
+        run: |
+          mkdir -p release-artifacts
+          if [ -d packages/opencode/dist/opencode-linux-x64 ]; then
+            cd packages/opencode/dist
+            tar -czf ../../../release-artifacts/opencode-linux-x64.tar.gz opencode-linux-x64/
+            cd ../../..
+          fi
+          cp sdks/vscode/opencode-*.vsix release-artifacts/ 2>/dev/null || true
+
+      - name: Get upstream version
+        id: version
+        run: |
+          UPSTREAM_SHA=$(git rev-parse upstream/dev | head -c 8)
+          DATE=$(date -u +%Y%m%d)
+          echo "tag=nightly-${DATE}-${UPSTREAM_SHA}" >> "$GITHUB_OUTPUT"
+          echo "name=Nightly ${DATE} (upstream ${UPSTREAM_SHA})" >> "$GITHUB_OUTPUT"
+
+      - name: Delete previous nightly release
+        run: |
+          gh release list --limit 20 --json tagName --jq '.[].tagName' | \
+            grep '^nightly-' | \
+            xargs -I {} sh -c 'gh release delete {} --yes --cleanup-tag 2>/dev/null || true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create nightly release
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" \
+            release-artifacts/* \
+            --title "${{ steps.version.outputs.name }}" \
+            --notes "Auto-built from \`hardened\` branch (rebased on upstream dev).
+
+          **Upstream:** anomalyco/opencode@$(git rev-parse upstream/dev | head -c 8)
+          **Hardened patches:** $(git log dev..hardened --oneline | wc -l | tr -d ' ') commits
+
+          See [INSTALL-HARDENED.md](https://github.com/${{ github.repository }}/blob/hardened/INSTALL-HARDENED.md) for setup." \
+            --prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
