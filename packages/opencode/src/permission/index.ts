@@ -2,6 +2,7 @@ import { Bus } from "@/bus"
 import { BusEvent } from "@/bus/bus-event"
 import { Config } from "@/config/config"
 import { InstanceState } from "@/effect/instance-state"
+import { Global } from "@/global"
 import { ProjectID } from "@/project/schema"
 import { Instance } from "@/project/instance"
 import { MessageID, SessionID } from "@/session/schema"
@@ -10,11 +11,33 @@ import { Database, eq } from "@/storage/db"
 import { Log } from "@/util/log"
 import { Wildcard } from "@/util/wildcard"
 import { Deferred, Effect, Layer, Schema, Context } from "effect"
+import fsNode from "fs/promises"
+import { applyEdits, modify } from "jsonc-parser"
 import os from "os"
+import path from "path"
 import z from "zod"
 import { evaluate as evalRule } from "./evaluate"
 import { Safety } from "./safety"
 import { PermissionID } from "./schema"
+
+// Persist "always allow" decisions back to the global config file so they
+// survive restarts and can be inspected/edited without a SQLite client.
+async function writeApprovedToConfig(rules: Array<{ permission: string; pattern: string }>) {
+  const configPath = path.join(Global.Path.config, "opencode.jsonc")
+  let text: string
+  try {
+    text = await fsNode.readFile(configPath, "utf-8")
+  } catch {
+    text = "{}"
+  }
+  for (const rule of rules) {
+    const edits = modify(text, ["permission", rule.permission, rule.pattern], "allow", {
+      formattingOptions: { insertSpaces: true, tabSize: 2 },
+    })
+    text = applyEdits(text, edits)
+  }
+  await fsNode.writeFile(configPath, text, "utf-8")
+}
 
 export namespace Permission {
   const log = Log.create({ service: "permission" })
@@ -267,12 +290,22 @@ export namespace Permission {
         yield* Deferred.succeed(existing.deferred, undefined)
         if (input.reply === "once") return
 
+        const newRules: Array<{ permission: string; pattern: string }> = []
         for (const pattern of existing.info.always) {
           approved.push({
             permission: existing.info.permission,
             pattern,
             action: "allow",
           })
+          newRules.push({ permission: existing.info.permission, pattern })
+        }
+        // Fire-and-forget — don't block the permission reply on disk write.
+        // Persists to opencode.jsonc so approvals survive restarts and are
+        // human-readable without a SQLite client.
+        if (newRules.length > 0) {
+          writeApprovedToConfig(newRules).catch((err) =>
+            log.warn("failed to persist approved permission to config", { err: String(err) }),
+          )
         }
 
         for (const [id, item] of pending.entries()) {
