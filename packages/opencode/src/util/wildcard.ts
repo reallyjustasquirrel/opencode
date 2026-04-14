@@ -15,7 +15,7 @@ export namespace Wildcard {
       escaped = escaped.slice(0, -3) + "( .*)?"
     }
 
-    const flags = process.platform === "win32" ? "si" : "s"
+    const flags = process.platform === "win32" || process.platform === "darwin" ? "si" : "s"
     return new RegExp("^" + escaped + "$", flags).test(str)
   }
 

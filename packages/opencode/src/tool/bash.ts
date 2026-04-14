@@ -14,6 +14,7 @@ import { Flag } from "@/flag/flag"
 import { Shell } from "@/shell/shell"
 
 import { BashArity } from "@/permission/arity"
+import { DangerousCommands } from "@/permission/dangerous-commands"
 import { Truncate } from "./truncate"
 import { Plugin } from "@/plugin"
 import { Effect, Stream } from "effect"
@@ -485,6 +486,11 @@ export const BashTool = Tool.define(
               const root = yield* parse(params.command, ps)
               const scan = yield* collect(root, cwd, ps, shell)
               if (!Instance.containsPath(cwd)) scan.dirs.add(cwd)
+              const danger = DangerousCommands.check(params.command)
+              if (danger) {
+                scan.patterns.add(params.command)
+                scan.always.add(params.command)
+              }
               yield* ask(ctx, scan)
 
               return yield* run(

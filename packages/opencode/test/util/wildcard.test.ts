@@ -79,12 +79,12 @@ test("match normalizes slashes for cross-platform globbing", () => {
   expect(Wildcard.match("C:/Windows/System32/drivers", "C:\\Windows\\System32\\*")).toBe(true)
 })
 
-test("match handles case-insensitivity on Windows", () => {
-  if (process.platform === "win32") {
-    expect(Wildcard.match("C:\\windows\\system32\\hosts", "C:/Windows/System32/*")).toBe(true)
-    expect(Wildcard.match("c:/windows/system32/hosts", "C:\\Windows\\System32\\*")).toBe(true)
+test("match handles case-insensitivity on Windows and macOS", () => {
+  if (process.platform === "win32" || process.platform === "darwin") {
+    // Windows and macOS filesystems are case-insensitive
+    expect(Wildcard.match("/users/test/file", "/Users/test/*")).toBe(true)
   } else {
-    // Unix paths are case-sensitive
+    // Linux paths are case-sensitive
     expect(Wildcard.match("/users/test/file", "/Users/test/*")).toBe(false)
   }
 })

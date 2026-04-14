@@ -275,7 +275,13 @@ export namespace ToolRegistry {
 
       const tools: Interface["tools"] = Effect.fn("ToolRegistry.tools")(function* (input) {
         const e2e = !!(yield* env.get("OPENCODE_E2E_LLM_URL"))
+        const denied = Permission.disabled(
+          (yield* all()).map((tool) => tool.id),
+          input.agent.permission,
+        )
         const filtered = (yield* all()).filter((tool) => {
+          if (denied.has(tool.id)) return false
+
           if (tool.id === CodeSearchTool.id || tool.id === WebSearchTool.id) {
             return input.providerID === ProviderID.opencode || Flag.OPENCODE_ENABLE_EXA
           }

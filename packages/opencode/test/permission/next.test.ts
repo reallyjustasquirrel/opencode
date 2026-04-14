@@ -213,12 +213,14 @@ test("merge - preserves rule order", () => {
   ])
 })
 
-test("merge - config permission overrides default ask", () => {
+test("merge - config allow overrides default ask (last-match-wins)", () => {
   const defaults: Permission.Ruleset = [{ permission: "*", pattern: "*", action: "ask" }]
   const config: Permission.Ruleset = [{ permission: "bash", pattern: "*", action: "allow" }]
   const merged = Permission.merge(defaults, config)
 
+  // last-match-wins: config allow overrides default ask for bash
   expect(Permission.evaluate("bash", "ls", merged).action).toBe("allow")
+  // edit still falls back to default ask (no override)
   expect(Permission.evaluate("edit", "foo.ts", merged).action).toBe("ask")
 })
 
@@ -250,12 +252,12 @@ test("evaluate - last matching rule wins", () => {
   expect(result.action).toBe("deny")
 })
 
-test("evaluate - last matching rule wins (wildcard after specific)", () => {
+test("evaluate - deny wins over later allow (priority-based)", () => {
   const result = Permission.evaluate("bash", "rm", [
     { permission: "bash", pattern: "rm", action: "deny" },
     { permission: "bash", pattern: "*", action: "allow" },
   ])
-  expect(result.action).toBe("allow")
+  expect(result.action).toBe("deny")
 })
 
 test("evaluate - glob pattern match", () => {
@@ -263,12 +265,13 @@ test("evaluate - glob pattern match", () => {
   expect(result.action).toBe("allow")
 })
 
-test("evaluate - last matching glob wins", () => {
+test("evaluate - deny beats more specific allow (priority-based)", () => {
   const result = Permission.evaluate("edit", "src/components/Button.tsx", [
     { permission: "edit", pattern: "src/*", action: "deny" },
     { permission: "edit", pattern: "src/components/*", action: "allow" },
   ])
-  expect(result.action).toBe("allow")
+  // deny wins over allow regardless of specificity
+  expect(result.action).toBe("deny")
 })
 
 test("evaluate - order matters for specificity", () => {
@@ -310,12 +313,13 @@ test("evaluate - multiple matching patterns, last wins", () => {
   expect(result.action).toBe("deny")
 })
 
-test("evaluate - non-matching patterns are skipped", () => {
+test("evaluate - allow overrides ask when last match (deny does not match)", () => {
   const result = Permission.evaluate("edit", "src/foo.ts", [
     { permission: "edit", pattern: "*", action: "ask" },
     { permission: "edit", pattern: "test/*", action: "deny" },
     { permission: "edit", pattern: "src/*", action: "allow" },
   ])
+  // last-match-wins for ask vs allow: src/* allow is last. deny (test/*) does not match.
   expect(result.action).toBe("allow")
 })
 
@@ -327,12 +331,12 @@ test("evaluate - exact match at end wins over earlier wildcard", () => {
   expect(result.action).toBe("deny")
 })
 
-test("evaluate - wildcard at end overrides earlier exact match", () => {
+test("evaluate - deny wins over later wildcard allow", () => {
   const result = Permission.evaluate("bash", "/bin/rm", [
     { permission: "bash", pattern: "/bin/rm", action: "deny" },
     { permission: "bash", pattern: "*", action: "allow" },
   ])
-  expect(result.action).toBe("allow")
+  expect(result.action).toBe("deny")
 })
 
 // wildcard permission tests
@@ -354,20 +358,22 @@ test("evaluate - glob permission pattern", () => {
   expect(result.action).toBe("allow")
 })
 
-test("evaluate - specific permission and wildcard permission combined", () => {
+test("evaluate - deny from wildcard permission beats specific allow", () => {
   const result = Permission.evaluate("bash", "rm", [
     { permission: "*", pattern: "*", action: "deny" },
     { permission: "bash", pattern: "*", action: "allow" },
   ])
-  expect(result.action).toBe("allow")
+  // deny (from * permission) beats allow (from bash) in priority evaluation
+  expect(result.action).toBe("deny")
 })
 
-test("evaluate - wildcard permission does not match when specific exists", () => {
+test("evaluate - deny from wildcard permission beats specific path allow", () => {
   const result = Permission.evaluate("edit", "src/foo.ts", [
     { permission: "*", pattern: "*", action: "deny" },
     { permission: "edit", pattern: "src/*", action: "allow" },
   ])
-  expect(result.action).toBe("allow")
+  // deny (from * permission) beats allow (from edit/src/*) in priority evaluation
+  expect(result.action).toBe("deny")
 })
 
 test("evaluate - multiple matching permission patterns combine rules", () => {
@@ -400,6 +406,42 @@ test("evaluate - merges multiple rulesets", () => {
   const approved: Permission.Ruleset = [{ permission: "bash", pattern: "rm", action: "deny" }]
   const result = Permission.evaluate("bash", "rm", config, approved)
   expect(result.action).toBe("deny")
+})
+
+// priority-based evaluation tests
+
+test("evaluate - deny beats allow regardless of order", () => {
+  const result = Permission.evaluate("bash", "rm", [
+    { permission: "bash", pattern: "*", action: "allow" },
+    { permission: "bash", pattern: "*", action: "deny" },
+  ])
+  expect(result.action).toBe("deny")
+})
+
+test("evaluate - deny from earlier ruleset beats allow from later", () => {
+  const result = Permission.evaluate(
+    "bash",
+    "rm",
+    [{ permission: "bash", pattern: "rm", action: "deny" }],
+    [{ permission: "bash", pattern: "*", action: "allow" }],
+  )
+  expect(result.action).toBe("deny")
+})
+
+test("evaluate - ask beats allow regardless of order", () => {
+  const result = Permission.evaluate("bash", "rm", [
+    { permission: "bash", pattern: "*", action: "allow" },
+    { permission: "bash", pattern: "rm", action: "ask" },
+  ])
+  expect(result.action).toBe("ask")
+})
+
+test("evaluate - allow only wins when no deny or ask matches", () => {
+  const result = Permission.evaluate("bash", "ls", [
+    { permission: "bash", pattern: "rm", action: "deny" },
+    { permission: "bash", pattern: "*", action: "allow" },
+  ])
+  expect(result.action).toBe("allow")
 })
 
 // disabled tests
