@@ -52,9 +52,10 @@ async function openConfig(api: TuiPluginApi) {
   if (editor) {
     Process.spawn([...editor.split(" "), file], { stdout: "ignore", stderr: "ignore" })
   } else if (process.platform === "darwin") {
-    // Try VS Code first if we're inside it (--reuse-window keeps it in the same instance)
     if (process.env["TERM_PROGRAM"] === "vscode") {
-      Process.spawn(["open", "-a", "Visual Studio Code", "--args", "--reuse-window", file], { stdout: "ignore", stderr: "ignore" })
+      // Use the VS Code CLI directly — open always spawns a new window with --args
+      const cli = "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"
+      Process.spawn([cli, "-r", file], { stdout: "ignore", stderr: "ignore" })
     } else {
       Process.spawn(["open", "-a", "TextEdit", file], { stdout: "ignore", stderr: "ignore" })
     }
