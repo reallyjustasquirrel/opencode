@@ -3,6 +3,7 @@ import { Global } from "@/global"
 import { Filesystem } from "@/util/filesystem"
 import { Process } from "@/util/process"
 import path from "path"
+import { execSync } from "child_process"
 
 const id = "internal:config"
 
@@ -15,35 +16,50 @@ async function configPath(): Promise<string> {
   return path.join(dir, "opencode.jsonc")
 }
 
-function editorCommand(): string[] {
-  const editor = process.env["VISUAL"] || process.env["EDITOR"]
-  if (editor) return editor.split(" ")
-  if (process.env["TERM_PROGRAM"] === "vscode") return ["code", "--wait"]
-  if (process.platform === "darwin") return ["open", "-t"]
-  if (process.platform === "win32") return ["notepad"]
-  return ["xdg-open"]
+function isTerminalEditor(cmd: string): boolean {
+  const terminal = ["vi", "vim", "nvim", "nano", "emacs", "micro", "helix", "hx", "joe", "pico", "ne"]
+  const bin = cmd.split("/").pop()?.split(" ")[0] || ""
+  return terminal.includes(bin)
 }
 
 async function openConfig(api: TuiPluginApi) {
   const file = await configPath()
-  const cmd = editorCommand()
-  const renderer = api.renderer
-  renderer.suspend()
-  renderer.currentRenderBuffer.clear()
-  try {
-    const proc = Process.spawn([...cmd, file], {
-      stdin: "inherit",
-      stdout: "inherit",
-      stderr: "inherit",
-      shell: process.platform === "win32",
-    })
-    await proc.exited
-  } finally {
+  const editor = process.env["VISUAL"] || process.env["EDITOR"]
+
+  // Terminal editors (vim, nano, etc.) need suspend/resume
+  if (editor && isTerminalEditor(editor)) {
+    const renderer = api.renderer
+    renderer.suspend()
     renderer.currentRenderBuffer.clear()
-    renderer.resume()
-    renderer.requestRender()
+    try {
+      const parts = editor.split(" ")
+      const proc = Process.spawn([...parts, file], {
+        stdin: "inherit",
+        stdout: "inherit",
+        stderr: "inherit",
+      })
+      await proc.exited
+    } finally {
+      renderer.currentRenderBuffer.clear()
+      renderer.resume()
+      renderer.requestRender()
+    }
+    api.ui.toast({ variant: "info", message: "Config saved — restart opencode to apply changes" })
+    return
   }
-  api.ui.toast({ variant: "info", message: "Config saved — restart opencode to apply changes" })
+
+  // GUI editors — open without blocking the TUI
+  if (editor) {
+    Process.spawn([...editor.split(" "), file], { stdout: "ignore", stderr: "ignore" })
+  } else if (process.platform === "darwin") {
+    // open -t uses the default text editor; open alone uses file association
+    Process.spawn(["open", file], { stdout: "ignore", stderr: "ignore" })
+  } else if (process.platform === "win32") {
+    Process.spawn(["notepad", file], { stdout: "ignore", stderr: "ignore" })
+  } else {
+    Process.spawn(["xdg-open", file], { stdout: "ignore", stderr: "ignore" })
+  }
+  api.ui.toast({ variant: "info", message: `Opened ${file} — restart opencode after saving` })
 }
 
 const tui: TuiPlugin = async (api) => {
