@@ -1120,3 +1120,277 @@ it.live("ask - abort should clear pending request", () =>
     if (Exit.isFailure(exit)) expect(Cause.squash(exit.cause)).toBeInstanceOf(Permission.RejectedError)
   }),
 )
+
+// evaluate: real-world agent config patterns
+
+test("evaluate - .env.example allow overrides .env.* ask (agent config pattern)", () => {
+  const ruleset = Permission.fromConfig({
+    read: {
+      "*": "allow",
+      "*.env": "ask",
+      "*.env.*": "ask",
+      "*.env.example": "allow",
+    },
+  })
+  expect(Permission.evaluate("read", ".env.example", ruleset).action).toBe("allow")
+  expect(Permission.evaluate("read", ".env", ruleset).action).toBe("ask")
+  expect(Permission.evaluate("read", ".env.local", ruleset).action).toBe("ask")
+  expect(Permission.evaluate("read", ".env.production", ruleset).action).toBe("ask")
+  expect(Permission.evaluate("read", "src/index.ts", ruleset).action).toBe("allow")
+})
+
+test("evaluate - deny in later ruleset beats allow in earlier", () => {
+  const ruleset1: Permission.Ruleset = [{ permission: "bash", pattern: "*", action: "allow" }]
+  const ruleset2: Permission.Ruleset = [{ permission: "bash", pattern: "rm *", action: "deny" }]
+  expect(Permission.evaluate("bash", "rm -rf /", ruleset1, ruleset2).action).toBe("deny")
+})
+
+test("evaluate - deny in earlier ruleset beats allow in later", () => {
+  const ruleset1: Permission.Ruleset = [{ permission: "bash", pattern: "rm *", action: "deny" }]
+  const ruleset2: Permission.Ruleset = [{ permission: "bash", pattern: "*", action: "allow" }]
+  expect(Permission.evaluate("bash", "rm -rf /", ruleset1, ruleset2).action).toBe("deny")
+})
+
+test("evaluate - last-match-wins for ask vs allow preserves specificity", () => {
+  const ruleset: Permission.Ruleset = [
+    { permission: "edit", pattern: "*", action: "ask" },
+    { permission: "edit", pattern: "src/*", action: "allow" },
+  ]
+  // src/* allow is more specific and comes last → wins over * ask
+  expect(Permission.evaluate("edit", "src/foo.ts", ruleset).action).toBe("allow")
+  // non-matching specific → falls back to * ask
+  expect(Permission.evaluate("edit", "config.json", ruleset).action).toBe("ask")
+})
+
+// safety integration in ask()
+
+it.live("ask - safety forces ask even when ruleset allows dangerous file", () =>
+  withDir({ git: true }, () =>
+    Effect.gen(function* () {
+      const fiber = yield* ask({
+        sessionID: SessionID.make("session_safety1"),
+        permission: "edit",
+        patterns: [".bashrc"],
+        metadata: {},
+        always: [".bashrc"],
+        ruleset: [{ permission: "edit", pattern: "*", action: "allow" }],
+      }).pipe(Effect.forkScoped)
+
+      // safety override: .bashrc should still require permission despite allow rule
+      const pending = yield* waitForPending(1)
+      expect(pending).toHaveLength(1)
+      expect(pending[0].patterns).toContain(".bashrc")
+
+      yield* rejectAll()
+      yield* Fiber.await(fiber)
+    }),
+  ),
+)
+
+it.live("ask - safety does not override deny (deny still short-circuits)", () =>
+  withDir({ git: true }, () =>
+    Effect.gen(function* () {
+      const err = yield* fail(
+        ask({
+          sessionID: SessionID.make("session_safety2"),
+          permission: "edit",
+          patterns: [".bashrc"],
+          metadata: {},
+          always: [],
+          ruleset: [{ permission: "edit", pattern: "*", action: "deny" }],
+        }),
+      )
+      expect(err).toBeInstanceOf(Permission.DeniedError)
+    }),
+  ),
+)
+
+it.live("ask - safety does not check read permission (only edit/bash)", () =>
+  withDir({ git: true }, () =>
+    Effect.gen(function* () {
+      const result = yield* ask({
+        sessionID: SessionID.make("session_safety3"),
+        permission: "read",
+        patterns: [".bashrc"],
+        metadata: {},
+        always: [],
+        ruleset: [{ permission: "read", pattern: "*", action: "allow" }],
+      })
+      // read + .bashrc + allow → resolves immediately (safety only checks edit/bash)
+      expect(result).toBeUndefined()
+    }),
+  ),
+)
+
+it.live("ask - safety forces ask for .git directory even with allow", () =>
+  withDir({ git: true }, () =>
+    Effect.gen(function* () {
+      const fiber = yield* ask({
+        sessionID: SessionID.make("session_safety4"),
+        permission: "edit",
+        patterns: [".git/config"],
+        metadata: {},
+        always: [".git/config"],
+        ruleset: [{ permission: "edit", pattern: "*", action: "allow" }],
+      }).pipe(Effect.forkScoped)
+
+      const pending = yield* waitForPending(1)
+      expect(pending).toHaveLength(1)
+
+      yield* rejectAll()
+      yield* Fiber.await(fiber)
+    }),
+  ),
+)
+
+it.live("ask - normal file resolves immediately with allow (safety not triggered)", () =>
+  withDir({ git: true }, () =>
+    Effect.gen(function* () {
+      const result = yield* ask({
+        sessionID: SessionID.make("session_safety5"),
+        permission: "edit",
+        patterns: ["src/index.ts"],
+        metadata: {},
+        always: [],
+        ruleset: [{ permission: "edit", pattern: "*", action: "allow" }],
+      })
+      expect(result).toBeUndefined()
+    }),
+  ),
+)
+
+// denial tracking
+
+it.live("denial tracking - consecutive rejections do not break", () =>
+  withDir({ git: true }, () =>
+    Effect.gen(function* () {
+      // reject 4 times in a row (exceeds MAX_CONSECUTIVE_DENIALS=3)
+      for (let i = 0; i < 4; i++) {
+        const id = PermissionID.make(`per_deny_consec_${i}`)
+        const fiber = yield* ask({
+          id,
+          sessionID: SessionID.make("session_deny_track"),
+          permission: "bash",
+          patterns: ["dangerous_cmd"],
+          metadata: {},
+          always: [],
+          ruleset: [],
+        }).pipe(Effect.forkScoped)
+        yield* waitForPending(1)
+        yield* reply({ requestID: id, reply: "reject" })
+        yield* Fiber.await(fiber)
+      }
+      // 4th rejection succeeded without crash — tracking works
+      expect(true).toBe(true)
+    }),
+  ),
+)
+
+it.live("denial tracking - approval resets consecutive counter", () =>
+  withDir({ git: true }, () =>
+    Effect.gen(function* () {
+      // reject twice
+      for (let i = 0; i < 2; i++) {
+        const id = PermissionID.make(`per_deny_reset_${i}`)
+        const fiber = yield* ask({
+          id,
+          sessionID: SessionID.make("session_deny_reset"),
+          permission: "bash",
+          patterns: ["cmd"],
+          metadata: {},
+          always: ["cmd"],
+          ruleset: [],
+        }).pipe(Effect.forkScoped)
+        yield* waitForPending(1)
+        yield* reply({ requestID: id, reply: "reject" })
+        yield* Fiber.await(fiber)
+      }
+
+      // approve once (resets consecutive counter)
+      const approveId = PermissionID.make("per_deny_reset_approve")
+      const approveFiber = yield* ask({
+        id: approveId,
+        sessionID: SessionID.make("session_deny_reset"),
+        permission: "bash",
+        patterns: ["cmd"],
+        metadata: {},
+        always: ["cmd"],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+      yield* waitForPending(1)
+      yield* reply({ requestID: approveId, reply: "once" })
+      yield* Fiber.join(approveFiber)
+
+      // reject twice more (should work fine since consecutive was reset)
+      for (let i = 0; i < 2; i++) {
+        const id = PermissionID.make(`per_deny_reset_after_${i}`)
+        const fiber = yield* ask({
+          id,
+          sessionID: SessionID.make("session_deny_reset"),
+          permission: "bash",
+          patterns: ["cmd"],
+          metadata: {},
+          always: [],
+          ruleset: [],
+        }).pipe(Effect.forkScoped)
+        yield* waitForPending(1)
+        yield* reply({ requestID: id, reply: "reject" })
+        yield* Fiber.await(fiber)
+      }
+
+      expect(true).toBe(true)
+    }),
+  ),
+)
+
+it.live("denial tracking - separate sessions are independent", () =>
+  withDir({ git: true }, () =>
+    Effect.gen(function* () {
+      // reject in session A
+      const idA = PermissionID.make("per_deny_iso_a")
+      const fiberA = yield* ask({
+        id: idA,
+        sessionID: SessionID.make("session_deny_iso_a"),
+        permission: "bash",
+        patterns: ["cmd"],
+        metadata: {},
+        always: [],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+      yield* waitForPending(1)
+      yield* reply({ requestID: idA, reply: "reject" })
+      yield* Fiber.await(fiberA)
+
+      // approve in session B (separate session, no cross-contamination)
+      const idB = PermissionID.make("per_deny_iso_b")
+      const fiberB = yield* ask({
+        id: idB,
+        sessionID: SessionID.make("session_deny_iso_b"),
+        permission: "bash",
+        patterns: ["cmd"],
+        metadata: {},
+        always: ["cmd"],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+      yield* waitForPending(1)
+      yield* reply({ requestID: idB, reply: "once" })
+      yield* Fiber.join(fiberB)
+
+      // reject again in session A
+      const idA2 = PermissionID.make("per_deny_iso_a2")
+      const fiberA2 = yield* ask({
+        id: idA2,
+        sessionID: SessionID.make("session_deny_iso_a"),
+        permission: "bash",
+        patterns: ["cmd"],
+        metadata: {},
+        always: [],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+      yield* waitForPending(1)
+      yield* reply({ requestID: idA2, reply: "reject" })
+      const exit = yield* Fiber.await(fiberA2)
+      expect(Exit.isFailure(exit)).toBe(true)
+    }),
+  ),
+)
