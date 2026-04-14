@@ -94,3 +94,57 @@ test("check - case insensitive on darwin/win32", () => {
     expect(Safety.check("edit", ".VSCode/settings.json")).toBe("ask")
   }
 })
+
+// missing dangerous files
+
+test("check - .gitmodules always asks for edit", () => {
+  expect(Safety.check("edit", ".gitmodules")).toBe("ask")
+})
+
+test("check - .bash_profile always asks for edit", () => {
+  expect(Safety.check("edit", ".bash_profile")).toBe("ask")
+})
+
+test("check - .zprofile always asks for edit", () => {
+  expect(Safety.check("edit", ".zprofile")).toBe("ask")
+})
+
+test("check - .ripgreprc always asks for edit", () => {
+  expect(Safety.check("edit", ".ripgreprc")).toBe("ask")
+})
+
+// bare directory name (no child path)
+
+test("check - bare .git triggers", () => {
+  expect(Safety.check("edit", ".git")).toBe("ask")
+})
+
+test("check - bare .opencode triggers", () => {
+  expect(Safety.check("edit", ".opencode")).toBe("ask")
+})
+
+// deeply nested paths
+
+test("check - deeply nested .git triggers", () => {
+  expect(Safety.check("edit", "a/b/c/.git/hooks/pre-commit")).toBe("ask")
+})
+
+test("check - deeply nested .bashrc triggers", () => {
+  expect(Safety.check("bash", "/home/user/dotfiles/.bashrc")).toBe("ask")
+})
+
+// every dangerous file is covered
+
+test("check - all dangerous files trigger on edit", () => {
+  for (const file of Safety.DANGEROUS_FILES) {
+    expect(Safety.check("edit", file)).toBe("ask")
+  }
+})
+
+// every dangerous directory is covered
+
+test("check - all dangerous directories trigger on edit", () => {
+  for (const dir of Safety.DANGEROUS_DIRECTORIES) {
+    expect(Safety.check("edit", `${dir}/anything`)).toBe("ask")
+  }
+})
