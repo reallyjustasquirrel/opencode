@@ -90,7 +90,7 @@ export namespace Agent {
               "*": "ask",
               ...Object.fromEntries(whitelistedDirs.map((dir) => [dir, "allow"])),
             },
-            question: "deny",
+            question: "ask",
             plan_enter: "deny",
             plan_exit: "deny",
             // mirrors github.com/github/gitignore Node.gitignore pattern for .env files
