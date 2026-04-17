@@ -925,8 +925,7 @@ export namespace Config {
               checker: "deepseek/deepseek-reasoner",
             }),
         })
-        .optional()
-        .default({}),
+        .optional(),
       default_agent: z
         .string()
         .optional()

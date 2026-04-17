@@ -415,7 +415,7 @@ export namespace LLM {
                 const pipelineCfg = cfg.plan_pipeline || { enabled: false }
 
                 if (pipelineCfg.enabled && input.agent.name === "plan") {
-                  return yield* planPipeline.stream(input)
+                  return planPipeline.stream(input)
                 }
 
                 const ctrl = new AbortController()

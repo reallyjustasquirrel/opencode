@@ -9,7 +9,6 @@ import type { Agent } from "@/agent/agent"
 import { Permission } from "@/permission"
 import { ProviderTransform } from "@/provider/transform"
 import { ModelID, ProviderID } from "@/provider/schema"
-import { Provider } from "@/provider/provider"
 
 export namespace PlanPipeline {
   const log = Log.create({ service: "plan-pipeline" })
@@ -36,7 +35,7 @@ export namespace PlanPipeline {
   export type Event = Awaited<ReturnType<typeof streamText>>["fullStream"] extends AsyncIterable<infer T> ? T : never
 
   export interface Interface {
-    readonly stream: (input: StreamInput) => Stream.Stream<Event, unknown>
+    readonly stream: (input: StreamInput) => Stream.Stream<Event, unknown, never>
   }
 
   export class Service extends Context.Service<Service, Interface>()("@opencode/PlanPipeline") {}
@@ -52,7 +51,7 @@ export namespace PlanPipeline {
         const pipelineCfg = cfg.plan_pipeline || { enabled: false }
 
         if (!pipelineCfg.enabled || input.agent.name !== "plan") {
-          return yield* runSinglePhase(input, input.model)
+          return (yield* runSinglePhase(input, input.model)).stream
         }
 
         const models = pipelineCfg.models || {
@@ -86,7 +85,7 @@ export namespace PlanPipeline {
           return validated.stream
         } catch (err) {
           l.warn("pipeline failed, falling back to single model", { error: String(err) })
-          return yield* runSinglePhase(input, input.model)
+          return (yield* runSinglePhase(input, input.model)).stream
         }
       })
 
@@ -106,34 +105,26 @@ export namespace PlanPipeline {
           .tag("pipeline", "single")
         l.info("running single model plan generation")
 
-        const [language, cfg] = yield* Effect.all([provider.getLanguage(model), config.get()], {
-          concurrency: "unbounded",
-        })
+        const language = yield* provider.getLanguage(model)
 
         const system = input.system
         const messages = input.messages
 
-        const result = yield* Effect.tryPromise({
-          try: () =>
-            streamText({
-              model: language,
-              system: system.join("\n"),
-              messages,
-              tools: input.tools,
-              toolChoice: input.toolChoice,
-              abortSignal: input.abort,
-              maxTokens: ProviderTransform.OUTPUT_TOKEN_MAX,
-              temperature: cfg.temperature,
-              topP: cfg.topP,
-              frequencyPenalty: cfg.frequencyPenalty,
-              presencePenalty: cfg.presencePenalty,
-            }),
-          catch: (err) => err as Error,
-        })
+        const result = yield* Effect.sync(() =>
+          streamText({
+            model: language,
+            system: system.join("\n"),
+            messages,
+            tools: input.tools,
+            toolChoice: input.toolChoice,
+            abortSignal: input.abort,
+            maxOutputTokens: ProviderTransform.OUTPUT_TOKEN_MAX,
+          }),
+        )
 
         return {
           stream: Stream.fromAsyncIterable(result.fullStream, () => {}),
-          messages: [...messages, ...(result.messages || [])],
+          messages: [...messages],
         }
       })
 
@@ -246,7 +237,7 @@ export namespace PlanPipeline {
 
               const controller = new AbortController()
               const result = yield* run({ ...input, abort: controller.signal })
-              return result.stream
+              return result
             }),
           ),
       })
