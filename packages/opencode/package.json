@@ -131,7 +131,7 @@
     "cli-sound": "1.1.3",
     "clipboardy": "4.0.0",
     "cross-spawn": "catalog:",
-    "decimal.js": "10.5.0",
+    "decimal.js": "10.6.0",
     "diff": "catalog:",
     "drizzle-orm": "catalog:",
     "effect": "catalog:",
