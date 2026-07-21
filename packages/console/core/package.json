@@ -10,7 +10,7 @@
     "@jsx-email/render": "1.1.1",
     "@opencode-ai/console-mail": "workspace:*",
     "@opencode-ai/console-resource": "workspace:*",
-    "@planetscale/database": "1.19.0",
+    "@planetscale/database": "1.20.1",
     "aws4fetch": "1.0.20",
     "drizzle-orm": "catalog:",
     "postgres": "3.4.7",
